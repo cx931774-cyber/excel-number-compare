@@ -51,3 +51,17 @@ test("includes unmatched-number and full-row export features", async () => {
   assert.match(page, /下载筛选完整行/);
   assert.match(page, /URL\.revokeObjectURL/);
 });
+
+test("supports multiple custom comparison conditions", async () => {
+  const page = await readFile(
+    new URL("../app/page.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(page, /添加比对条件/);
+  assert.match(page, /全部条件相同/);
+  assert.match(page, /任一条件相同/);
+  assert.match(page, /sourceRowsByComposite/);
+  assert.match(page, /sourceRowsByCondition/);
+  assert.match(page, /conditions\.length >= 8/);
+});

@@ -16,6 +16,14 @@ type ColumnOption = {
   dataStartRow: number;
 };
 
+type MatchMode = "all" | "any";
+
+type MatchCondition = {
+  id: number;
+  firstColumn: number;
+  secondColumn: number;
+};
+
 type MatchResult = {
   workbook: XLSX.WorkBook;
   filteredWorkbook: XLSX.WorkBook;
@@ -277,8 +285,10 @@ export default function Home() {
   const [second, setSecond] = useState<WorkbookFile | null>(null);
   const [firstSheet, setFirstSheet] = useState("");
   const [secondSheet, setSecondSheet] = useState("");
-  const [firstColumn, setFirstColumn] = useState(-1);
-  const [secondColumn, setSecondColumn] = useState(-1);
+  const [conditions, setConditions] = useState<MatchCondition[]>([
+    { id: 1, firstColumn: -1, secondColumn: -1 },
+  ]);
+  const [matchMode, setMatchMode] = useState<MatchMode>("all");
   const [relaxed, setRelaxed] = useState(false);
   const [protectIds, setProtectIds] = useState(true);
   const [showMatchBox, setShowMatchBox] = useState(true);
@@ -290,6 +300,7 @@ export default function Home() {
   const [error, setError] = useState("");
   const [result, setResult] = useState<MatchResult | null>(null);
   const [resetKey, setResetKey] = useState(0);
+  const nextConditionId = useRef(2);
   const resultRef = useRef<HTMLElement>(null);
   const matchBoxRef = useRef<HTMLTextAreaElement>(null);
 
@@ -313,11 +324,23 @@ export default function Home() {
       if (position === "first") {
         setFirst(loaded);
         setFirstSheet(sheet);
-        setFirstColumn(preferredColumn(options, "source"));
+        setConditions((current) => [
+          {
+            id: nextConditionId.current++,
+            firstColumn: preferredColumn(options, "source"),
+            secondColumn: current[0]?.secondColumn ?? -1,
+          },
+        ]);
       } else {
         setSecond(loaded);
         setSecondSheet(sheet);
-        setSecondColumn(preferredColumn(options, "target"));
+        setConditions((current) => [
+          {
+            id: nextConditionId.current++,
+            firstColumn: current[0]?.firstColumn ?? -1,
+            secondColumn: preferredColumn(options, "target"),
+          },
+        ]);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "无法读取这个文件。");
@@ -328,20 +351,71 @@ export default function Home() {
     setResult(null);
     if (position === "first" && first) {
       setFirstSheet(sheetName);
-      setFirstColumn(
-        preferredColumn(worksheetColumns(first.workbook, sheetName), "source"),
-      );
+      setConditions((current) => [
+        {
+          id: nextConditionId.current++,
+          firstColumn: preferredColumn(
+            worksheetColumns(first.workbook, sheetName),
+            "source",
+          ),
+          secondColumn: current[0]?.secondColumn ?? -1,
+        },
+      ]);
     }
     if (position === "second" && second) {
       setSecondSheet(sheetName);
-      setSecondColumn(
-        preferredColumn(worksheetColumns(second.workbook, sheetName), "target"),
-      );
+      setConditions((current) => [
+        {
+          id: nextConditionId.current++,
+          firstColumn: current[0]?.firstColumn ?? -1,
+          secondColumn: preferredColumn(
+            worksheetColumns(second.workbook, sheetName),
+            "target",
+          ),
+        },
+      ]);
     }
   }
 
+  function updateCondition(
+    id: number,
+    field: "firstColumn" | "secondColumn",
+    value: number,
+  ) {
+    setConditions((current) =>
+      current.map((condition) =>
+        condition.id === id ? { ...condition, [field]: value } : condition,
+      ),
+    );
+    setResult(null);
+  }
+
+  function addCondition() {
+    const usedFirst = new Set(conditions.map(({ firstColumn }) => firstColumn));
+    const usedSecond = new Set(conditions.map(({ secondColumn }) => secondColumn));
+    const firstOption =
+      firstColumns.find(({ index }) => !usedFirst.has(index)) ?? firstColumns[0];
+    const secondOption =
+      secondColumns.find(({ index }) => !usedSecond.has(index)) ?? secondColumns[0];
+    if (!firstOption || !secondOption) return;
+    setConditions((current) => [
+      ...current,
+      {
+        id: nextConditionId.current++,
+        firstColumn: firstOption.index,
+        secondColumn: secondOption.index,
+      },
+    ]);
+    setResult(null);
+  }
+
+  function removeCondition(id: number) {
+    setConditions((current) => current.filter((condition) => condition.id !== id));
+    setResult(null);
+  }
+
   async function compare() {
-    if (!first || !second || firstColumn < 0 || secondColumn < 0) return;
+    if (!ready || !first || !second) return;
     setBusy(true);
     setError("");
     setResult(null);
@@ -349,15 +423,30 @@ export default function Home() {
 
     try {
       const sourceSheet = first.workbook.Sheets[firstSheet];
-      const sourceOption = firstColumns.find(
-        (option) => option.index === firstColumn,
-      );
-      const targetOption = secondColumns.find(
-        (option) => option.index === secondColumn,
-      );
-      if (!sourceSheet?.["!ref"] || !sourceOption || !targetOption) {
+      const activeConditions = conditions.map((condition) => ({
+        ...condition,
+        sourceOption: firstColumns.find(
+          (option) => option.index === condition.firstColumn,
+        ),
+        targetOption: secondColumns.find(
+          (option) => option.index === condition.secondColumn,
+        ),
+      }));
+      if (
+        !sourceSheet?.["!ref"] ||
+        activeConditions.some(
+          ({ sourceOption, targetOption }) => !sourceOption || !targetOption,
+        )
+      ) {
         throw new Error("请选择有效的工作表和比对列。");
       }
+
+      const resolvedConditions = activeConditions as Array<
+        MatchCondition & {
+          sourceOption: ColumnOption;
+          targetOption: ColumnOption;
+        }
+      >;
 
       const outputWorkbook = XLSX.read(second.buffer.slice(0), {
         type: "array",
@@ -369,51 +458,110 @@ export default function Home() {
       if (!targetSheet?.["!ref"]) throw new Error("第二个工作表没有可读取的数据。");
 
       const sourceRange = XLSX.utils.decode_range(sourceSheet["!ref"]);
-      const sourceValues = new Set<string>();
-      const sourceRowsByValue = new Map<string, number[]>();
+      const sourceStartRow = Math.max(
+        ...resolvedConditions.map(({ sourceOption }) => sourceOption.dataStartRow),
+      );
+      const targetStartRow = Math.max(
+        ...resolvedConditions.map(({ targetOption }) => targetOption.dataStartRow),
+      );
+      const sourceRowsByComposite = new Map<string, number[]>();
+      const sourceRowsByCondition = resolvedConditions.map(
+        () => new Map<string, number[]>(),
+      );
       let sourceCount = 0;
-      for (let row = sourceOption.dataStartRow; row <= sourceRange.e.r; row += 1) {
-        const cell = sourceSheet[
-          XLSX.utils.encode_cell({ r: row, c: firstColumn })
-        ];
-        const value = normalize(cellText(cell), relaxed);
-        if (value) {
-          sourceCount += 1;
-          sourceValues.add(value);
-          const rows = sourceRowsByValue.get(value) ?? [];
+      for (let row = sourceStartRow; row <= sourceRange.e.r; row += 1) {
+        const values = resolvedConditions.map(({ firstColumn }) =>
+          normalize(
+            cellText(
+              sourceSheet[XLSX.utils.encode_cell({ r: row, c: firstColumn })],
+            ),
+            relaxed,
+          ),
+        );
+        const hasUsableValues =
+          matchMode === "all" ? values.every(Boolean) : values.some(Boolean);
+        if (!hasUsableValues) continue;
+        sourceCount += 1;
+
+        if (matchMode === "all") {
+          const key = JSON.stringify(values);
+          const rows = sourceRowsByComposite.get(key) ?? [];
           rows.push(row);
-          sourceRowsByValue.set(value, rows);
+          sourceRowsByComposite.set(key, rows);
+        } else {
+          values.forEach((value, index) => {
+            if (!value) return;
+            const rows = sourceRowsByCondition[index].get(value) ?? [];
+            rows.push(row);
+            sourceRowsByCondition[index].set(value, rows);
+          });
         }
       }
 
       const targetRange = XLSX.utils.decode_range(targetSheet["!ref"]);
       const matches: Array<{
         row: number;
-        sourceRow: number;
+        worksheetRow: number;
         value: string;
-        address: string;
+        addresses: string[];
+        sourceRows: number[];
       }> = [];
       const unmatchedNumbers = new Map<string, string>();
       const unmatchedRows: number[] = [];
       let targetCount = 0;
-      for (let row = targetOption.dataStartRow; row <= targetRange.e.r; row += 1) {
-        const address = XLSX.utils.encode_cell({ r: row, c: secondColumn });
-        const cell = targetSheet[address];
-        const displayValue = cellText(cell);
-        const value = normalize(displayValue, relaxed);
-        if (!value) continue;
+      for (let row = targetStartRow; row <= targetRange.e.r; row += 1) {
+        const displayValues = resolvedConditions.map(({ secondColumn }) =>
+          cellText(targetSheet[XLSX.utils.encode_cell({ r: row, c: secondColumn })]),
+        );
+        const values = displayValues.map((value) => normalize(value, relaxed));
+        if (!values.some(Boolean)) continue;
         targetCount += 1;
-        if (sourceValues.has(value)) {
+        const key = JSON.stringify(values);
+        const summary =
+          displayValues.length === 1
+            ? displayValues[0]
+            : displayValues
+                .map(
+                  (value, index) =>
+                    `${resolvedConditions[index].targetOption.letter}=${value || "（空）"}`,
+                )
+                .join(" | ");
+
+        let matchingIndexes: number[] = [];
+        let matchingSourceRows: number[] = [];
+        if (matchMode === "all" && values.every(Boolean)) {
+          matchingSourceRows = sourceRowsByComposite.get(key) ?? [];
+          if (matchingSourceRows.length) {
+            matchingIndexes = values.map((_, index) => index);
+          }
+        } else if (matchMode === "any") {
+          matchingIndexes = values.flatMap((value, index) =>
+            value && sourceRowsByCondition[index].has(value) ? [index] : [],
+          );
+          matchingSourceRows = [
+            ...new Set(
+              matchingIndexes.flatMap(
+                (index) => sourceRowsByCondition[index].get(values[index]) ?? [],
+              ),
+            ),
+          ];
+        }
+
+        if (matchingIndexes.length) {
           matches.push({
             row: row + 1,
-            sourceRow: row,
-            value: displayValue,
-            address,
+            worksheetRow: row,
+            value: summary,
+            addresses: matchingIndexes.map((index) =>
+              XLSX.utils.encode_cell({
+                r: row,
+                c: resolvedConditions[index].secondColumn,
+              }),
+            ),
+            sourceRows: matchingSourceRows,
           });
-        } else if (!unmatchedNumbers.has(value)) {
-          unmatchedNumbers.set(value, displayValue);
-          unmatchedRows.push(row);
         } else {
+          if (!unmatchedNumbers.has(key)) unmatchedNumbers.set(key, summary);
           unmatchedRows.push(row);
         }
       }
@@ -422,41 +570,40 @@ export default function Home() {
         ? protectLongIdentifiers(outputWorkbook)
         : 0;
       for (const match of matches) {
-        const cell = targetSheet[match.address] as StyledCell;
-        cell.s = {
-          ...(cell.s ?? {}),
-          fill: {
-            patternType: "solid",
-            fgColor: { rgb: "FFFF00" },
-            bgColor: { rgb: "FFFF00" },
-          },
-        };
+        for (const address of match.addresses) {
+          const cell = targetSheet[address] as StyledCell;
+          cell.s = {
+            ...(cell.s ?? {}),
+            fill: {
+              patternType: "solid",
+              fgColor: { rgb: "FFFF00" },
+              bgColor: { rgb: "FFFF00" },
+            },
+          };
+        }
       }
 
-      const matchedKeys = new Set(
-        matches.map((match) => normalize(match.value, relaxed)),
-      );
-      const sourceMatchRows = [...matchedKeys].flatMap(
-        (key) => sourceRowsByValue.get(key) ?? [],
-      );
+      const sourceMatchRows = [
+        ...new Set(matches.flatMap((match) => match.sourceRows)),
+      ].sort((left, right) => left - right);
       const filteredWorkbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(
         filteredWorkbook,
-        extractRows(sourceSheet, sourceOption.dataStartRow, sourceMatchRows),
+        extractRows(sourceSheet, sourceStartRow, sourceMatchRows),
         "相同行_第一表",
       );
       XLSX.utils.book_append_sheet(
         filteredWorkbook,
         extractRows(
           targetSheet,
-          targetOption.dataStartRow,
-          matches.map((match) => match.sourceRow),
+          targetStartRow,
+          matches.map((match) => match.worksheetRow),
         ),
         "相同行_第二表",
       );
       XLSX.utils.book_append_sheet(
         filteredWorkbook,
-        extractRows(targetSheet, targetOption.dataStartRow, unmatchedRows),
+        extractRows(targetSheet, targetStartRow, unmatchedRows),
         "不重复行_第二表",
       );
       if (protectIds) protectLongIdentifiers(filteredWorkbook);
@@ -538,8 +685,10 @@ export default function Home() {
     setSecond(null);
     setFirstSheet("");
     setSecondSheet("");
-    setFirstColumn(-1);
-    setSecondColumn(-1);
+    setConditions([
+      { id: nextConditionId.current++, firstColumn: -1, secondColumn: -1 },
+    ]);
+    setMatchMode("all");
     setResult(null);
     setError("");
     setNumberView("matched");
@@ -562,8 +711,15 @@ export default function Home() {
     window.setTimeout(() => setCopied(false), 1800);
   }
 
-  const ready =
-    first && second && firstColumn >= 0 && secondColumn >= 0 && !busy;
+  const ready = Boolean(
+    first &&
+      second &&
+      conditions.length > 0 &&
+      conditions.every(
+        ({ firstColumn, secondColumn }) => firstColumn >= 0 && secondColumn >= 0,
+      ) &&
+      !busy,
+  );
 
   return (
     <main className="site-shell">
@@ -573,7 +729,7 @@ export default function Home() {
           <p className="eyebrow">Excel 本地比对工具</p>
           <h1>号码对比，一次完成</h1>
           <p className="hero-copy">
-            上传两个表格，找出重复号码，在第二个表格中标黄并导出。文件只在你的浏览器中处理。
+            上传两个表格，按一个或多个自定义条件找出相同行，在第二个表格中标黄并导出。文件只在你的浏览器中处理。
           </p>
         </div>
         {(first || second) && (
@@ -613,10 +769,10 @@ export default function Home() {
           <div className="configuration">
             <div className="step-row compact">
               <span>第 2 步</span>
-              <strong>选择需要比对的列</strong>
-              <small>系统会自动跳过文字表头</small>
+              <strong>设置自定义比对条件</strong>
+              <small>可添加多组列，并选择全部满足或任一满足</small>
             </div>
-            <div className="selector-grid">
+            <div className="sheet-selector-grid">
               <div className="selector-card">
                 <label htmlFor="first-sheet">第一个表格 · 工作表</label>
                 <select
@@ -628,23 +784,7 @@ export default function Home() {
                     <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
-                <label htmlFor="first-column">用于查找的号码列</label>
-                <select
-                  id="first-column"
-                  value={firstColumn}
-                  onChange={(event) => {
-                    setFirstColumn(Number(event.target.value));
-                    setResult(null);
-                  }}
-                >
-                  {firstColumns.map((option) => (
-                    <option key={option.index} value={option.index}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
               </div>
-              <div className="direction-arrow" aria-hidden="true">→</div>
               <div className="selector-card">
                 <label htmlFor="second-sheet">第二个表格 · 工作表</label>
                 <select
@@ -656,26 +796,112 @@ export default function Home() {
                     <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
-                <label htmlFor="second-column">需要标黄的号码列</label>
-                <select
-                  id="second-column"
-                  value={secondColumn}
-                  onChange={(event) => {
-                    setSecondColumn(Number(event.target.value));
-                    setResult(null);
-                  }}
-                >
-                  {secondColumns.map((option) => (
-                    <option key={option.index} value={option.index}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
 
+            <div className="condition-builder">
+              <div className="condition-toolbar">
+                <div>
+                  <strong>自定义条件</strong>
+                  <span>每组条件把第一表的一列对应到第二表的一列</span>
+                </div>
+                <div className="match-mode-switch" role="group" aria-label="条件组合方式">
+                  <button
+                    type="button"
+                    className={matchMode === "all" ? "is-active" : ""}
+                    aria-pressed={matchMode === "all"}
+                    onClick={() => {
+                      setMatchMode("all");
+                      setResult(null);
+                    }}
+                  >
+                    全部条件相同
+                  </button>
+                  <button
+                    type="button"
+                    className={matchMode === "any" ? "is-active" : ""}
+                    aria-pressed={matchMode === "any"}
+                    onClick={() => {
+                      setMatchMode("any");
+                      setResult(null);
+                    }}
+                  >
+                    任一条件相同
+                  </button>
+                </div>
+              </div>
+
+              <div className="condition-list">
+                {conditions.map((condition, index) => (
+                  <div className="condition-row" key={condition.id}>
+                    <span className="condition-number">条件 {index + 1}</span>
+                    <label htmlFor={`first-column-${condition.id}`}>
+                      <span>第一表列</span>
+                      <select
+                        id={`first-column-${condition.id}`}
+                        value={condition.firstColumn}
+                        onChange={(event) =>
+                          updateCondition(
+                            condition.id,
+                            "firstColumn",
+                            Number(event.target.value),
+                          )
+                        }
+                      >
+                        {firstColumns.map((option) => (
+                          <option key={option.index} value={option.index}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="condition-arrow" aria-hidden="true">→</span>
+                    <label htmlFor={`second-column-${condition.id}`}>
+                      <span>第二表列</span>
+                      <select
+                        id={`second-column-${condition.id}`}
+                        value={condition.secondColumn}
+                        onChange={(event) =>
+                          updateCondition(
+                            condition.id,
+                            "secondColumn",
+                            Number(event.target.value),
+                          )
+                        }
+                      >
+                        {secondColumns.map((option) => (
+                          <option key={option.index} value={option.index}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {conditions.length > 1 && (
+                      <button
+                        className="remove-condition"
+                        type="button"
+                        aria-label={`删除条件 ${index + 1}`}
+                        onClick={() => removeCondition(condition.id)}
+                      >
+                        删除
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                className="add-condition"
+                type="button"
+                disabled={conditions.length >= 8}
+                onClick={addCondition}
+              >
+                {conditions.length >= 8 ? "最多添加 8 个条件" : "+ 添加比对条件"}
+              </button>
+            </div>
+
             <div className="options-row">
-              <label className="check-option">
+              <label className="check-option" aria-label="保护长编号">
                 <input
                   type="checkbox"
                   checked={protectIds}
@@ -686,7 +912,7 @@ export default function Home() {
                   <small>15 位以上数字导出时保存为文本，防止精度变化</small>
                 </span>
               </label>
-              <label className="check-option">
+              <label className="check-option" aria-label="忽略常见分隔符">
                 <input
                   type="checkbox"
                   checked={relaxed}
@@ -697,7 +923,7 @@ export default function Home() {
                   <small>比对时忽略空格、短横线和括号</small>
                 </span>
               </label>
-              <label className="check-option">
+              <label className="check-option" aria-label="显示号码文本框">
                 <input
                   type="checkbox"
                   checked={showMatchBox}
@@ -721,9 +947,9 @@ export default function Home() {
           onClick={compare}
         >
           {busy
-            ? "正在读取并比对，请稍候…"
+            ? "正在按自定义条件比对，请稍候…"
             : ready
-              ? "开始比对并标黄"
+              ? `按 ${conditions.length} 个条件开始比对并标黄`
               : "上传两个文件后开始比对"}
         </button>
       </section>
@@ -733,19 +959,21 @@ export default function Home() {
           <div className="result-heading">
             <div>
               <p className="eyebrow">比对完成</p>
-              <h2>已找到 {result.matchCount.toLocaleString()} 条相同号码</h2>
-              <p>对应单元格已在第二个表格中填充为黄色。</p>
+              <h2>已找到 {result.matchCount.toLocaleString()} 条相同行</h2>
+              <p>
+                按“{matchMode === "all" ? "全部条件相同" : "任一条件相同"}”完成比对，对应单元格已标黄。
+              </p>
             </div>
             <div className="success-badge">完成</div>
           </div>
 
           <div className="stat-grid">
-            <div><span>来源号码</span><strong>{result.sourceCount.toLocaleString()}</strong></div>
-            <div><span>第二表号码</span><strong>{result.targetCount.toLocaleString()}</strong></div>
+            <div><span>第一表有效行</span><strong>{result.sourceCount.toLocaleString()}</strong></div>
+            <div><span>第二表有效行</span><strong>{result.targetCount.toLocaleString()}</strong></div>
             <div><span>第一表相同行</span><strong>{result.sourceMatchRowCount.toLocaleString()}</strong></div>
             <div className="accent-stat"><span>匹配行数</span><strong>{result.matchCount.toLocaleString()}</strong></div>
-            <div><span>唯一匹配号码</span><strong>{result.uniqueMatchCount.toLocaleString()}</strong></div>
-            <div><span>不重复号码</span><strong>{result.uniqueUnmatchedCount.toLocaleString()}</strong></div>
+            <div><span>唯一匹配内容</span><strong>{result.uniqueMatchCount.toLocaleString()}</strong></div>
+            <div><span>不重复内容</span><strong>{result.uniqueUnmatchedCount.toLocaleString()}</strong></div>
           </div>
 
           {result.samples.length > 0 ? (
@@ -757,7 +985,7 @@ export default function Home() {
               <div className="sample-table" role="table">
                 <div className="sample-row table-head" role="row">
                   <span>第二表行号</span>
-                  <span>相同号码</span>
+                  <span>匹配的条件内容</span>
                   <span>状态</span>
                 </div>
                 {result.samples.map((sample) => (
@@ -770,18 +998,18 @@ export default function Home() {
               </div>
             </div>
           ) : (
-            <div className="empty-result">没有找到相同号码，仍可更换列或文件后再次比对。</div>
+            <div className="empty-result">没有找到符合条件的相同行，可更换条件、列或文件后再次比对。</div>
           )}
 
           {showMatchBox && (
             <div className="match-box-panel">
               <div className="match-box-heading">
                 <div>
-                  <strong>号码获取框</strong>
+                  <strong>匹配内容获取框</strong>
                   <span>
                     {numberView === "matched"
-                      ? `每行一个，共 ${result.matchedNumbers.length.toLocaleString()} 个相同号码`
-                      : `每行一个，共 ${result.unmatchedNumbers.length.toLocaleString()} 个不重复号码`}
+                      ? `每行一条，共 ${result.matchedNumbers.length.toLocaleString()} 条匹配内容`
+                      : `每行一条，共 ${result.unmatchedNumbers.length.toLocaleString()} 条不重复内容`}
                   </span>
                 </div>
                 <button type="button" onClick={copyNumbers}>
@@ -798,7 +1026,7 @@ export default function Home() {
                     setCopied(false);
                   }}
                 >
-                  相同号码 · {result.matchedNumbers.length.toLocaleString()}
+                  相同内容 · {result.matchedNumbers.length.toLocaleString()}
                 </button>
                 <button
                   type="button"
@@ -809,7 +1037,7 @@ export default function Home() {
                     setCopied(false);
                   }}
                 >
-                  一键获取不重复号码 · {result.unmatchedNumbers.length.toLocaleString()}
+                  一键获取不重复号码/内容 · {result.unmatchedNumbers.length.toLocaleString()}
                 </button>
               </div>
               <textarea
@@ -822,13 +1050,13 @@ export default function Home() {
                 }
                 placeholder={
                   numberView === "matched"
-                    ? "没有相同号码"
-                    : "没有不重复号码"
+                    ? "没有相同内容"
+                    : "没有不重复内容"
                 }
                 aria-label={
                   numberView === "matched"
-                    ? "相同号码，可选择和编辑"
-                    : "不重复号码，可选择和编辑"
+                    ? "相同内容，可选择和编辑"
+                    : "不重复内容，可选择和编辑"
                 }
                 spellCheck={false}
               />
