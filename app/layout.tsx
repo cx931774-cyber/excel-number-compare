@@ -4,7 +4,7 @@ import "./globals.css";
 
 const title = "表格号码比对";
 const description =
-  "在浏览器本地上传两个 Excel 表格，查找相同号码，在第二个表格中标黄并导出。";
+  "在浏览器本地上传两个 Excel 表格，查找相同与不重复号码，在第二个表格中标黄并导出。";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

@@ -18,14 +18,19 @@ type ColumnOption = {
 
 type MatchResult = {
   workbook: XLSX.WorkBook;
+  filteredWorkbook: XLSX.WorkBook;
   sourceCount: number;
   targetCount: number;
+  sourceMatchRowCount: number;
   matchCount: number;
   uniqueMatchCount: number;
+  uniqueUnmatchedCount: number;
   protectedLongIds: number;
   matchedNumbers: string[];
+  unmatchedNumbers: string[];
   samples: Array<{ row: number; value: string }>;
   outputName: string;
+  filteredOutputName: string;
 };
 
 type StyledCell = XLSX.CellObject & {
@@ -137,6 +142,53 @@ function protectLongIdentifiers(workbook: XLSX.WorkBook) {
   return protectedCount;
 }
 
+function extractRows(
+  sheet: XLSX.WorkSheet,
+  dataStartRow: number,
+  selectedRows: number[],
+) {
+  const extracted: XLSX.WorkSheet = {};
+  if (!sheet["!ref"]) return extracted;
+
+  const used = XLSX.utils.decode_range(sheet["!ref"]);
+  const headerRows = Array.from(
+    { length: Math.max(0, dataStartRow - used.s.r) },
+    (_, index) => used.s.r + index,
+  );
+  const dataRows = [...new Set(selectedRows)]
+    .filter((row) => row >= dataStartRow && row <= used.e.r)
+    .sort((left, right) => left - right);
+  const rowsToCopy = [...headerRows, ...dataRows];
+  if (!rowsToCopy.length) return extracted;
+
+  rowsToCopy.forEach((sourceRow, outputRow) => {
+    for (let column = used.s.c; column <= used.e.c; column += 1) {
+      const sourceAddress = XLSX.utils.encode_cell({ r: sourceRow, c: column });
+      const sourceCell = sheet[sourceAddress];
+      if (!sourceCell) continue;
+      const outputAddress = XLSX.utils.encode_cell({ r: outputRow, c: column });
+      extracted[outputAddress] = JSON.parse(JSON.stringify(sourceCell));
+    }
+  });
+
+  extracted["!ref"] = XLSX.utils.encode_range({
+    s: { r: 0, c: used.s.c },
+    e: { r: rowsToCopy.length - 1, c: used.e.c },
+  });
+  if (sheet["!cols"]) {
+    extracted["!cols"] = sheet["!cols"].map((column) =>
+      column ? { ...column } : column,
+    );
+  }
+  if (sheet["!rows"]) {
+    extracted["!rows"] = rowsToCopy.map((row) => {
+      const sourceRow = sheet["!rows"]?.[row];
+      return sourceRow ? { ...sourceRow } : sourceRow;
+    });
+  }
+  return extracted;
+}
+
 async function parseWorkbook(file: File): Promise<WorkbookFile> {
   if (!/\.xlsx?$/i.test(file.name)) {
     throw new Error("请选择 .xlsx 或 .xls 格式的 Excel 文件。");
@@ -230,6 +282,9 @@ export default function Home() {
   const [relaxed, setRelaxed] = useState(false);
   const [protectIds, setProtectIds] = useState(true);
   const [showMatchBox, setShowMatchBox] = useState(true);
+  const [numberView, setNumberView] = useState<"matched" | "unmatched">(
+    "matched",
+  );
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -315,6 +370,7 @@ export default function Home() {
 
       const sourceRange = XLSX.utils.decode_range(sourceSheet["!ref"]);
       const sourceValues = new Set<string>();
+      const sourceRowsByValue = new Map<string, number[]>();
       let sourceCount = 0;
       for (let row = sourceOption.dataStartRow; row <= sourceRange.e.r; row += 1) {
         const cell = sourceSheet[
@@ -324,11 +380,21 @@ export default function Home() {
         if (value) {
           sourceCount += 1;
           sourceValues.add(value);
+          const rows = sourceRowsByValue.get(value) ?? [];
+          rows.push(row);
+          sourceRowsByValue.set(value, rows);
         }
       }
 
       const targetRange = XLSX.utils.decode_range(targetSheet["!ref"]);
-      const matches: Array<{ row: number; value: string; address: string }> = [];
+      const matches: Array<{
+        row: number;
+        sourceRow: number;
+        value: string;
+        address: string;
+      }> = [];
+      const unmatchedNumbers = new Map<string, string>();
+      const unmatchedRows: number[] = [];
       let targetCount = 0;
       for (let row = targetOption.dataStartRow; row <= targetRange.e.r; row += 1) {
         const address = XLSX.utils.encode_cell({ r: row, c: secondColumn });
@@ -338,7 +404,17 @@ export default function Home() {
         if (!value) continue;
         targetCount += 1;
         if (sourceValues.has(value)) {
-          matches.push({ row: row + 1, value: displayValue, address });
+          matches.push({
+            row: row + 1,
+            sourceRow: row,
+            value: displayValue,
+            address,
+          });
+        } else if (!unmatchedNumbers.has(value)) {
+          unmatchedNumbers.set(value, displayValue);
+          unmatchedRows.push(row);
+        } else {
+          unmatchedRows.push(row);
         }
       }
 
@@ -357,6 +433,34 @@ export default function Home() {
         };
       }
 
+      const matchedKeys = new Set(
+        matches.map((match) => normalize(match.value, relaxed)),
+      );
+      const sourceMatchRows = [...matchedKeys].flatMap(
+        (key) => sourceRowsByValue.get(key) ?? [],
+      );
+      const filteredWorkbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        filteredWorkbook,
+        extractRows(sourceSheet, sourceOption.dataStartRow, sourceMatchRows),
+        "相同行_第一表",
+      );
+      XLSX.utils.book_append_sheet(
+        filteredWorkbook,
+        extractRows(
+          targetSheet,
+          targetOption.dataStartRow,
+          matches.map((match) => match.sourceRow),
+        ),
+        "相同行_第二表",
+      );
+      XLSX.utils.book_append_sheet(
+        filteredWorkbook,
+        extractRows(targetSheet, targetOption.dataStartRow, unmatchedRows),
+        "不重复行_第二表",
+      );
+      if (protectIds) protectLongIdentifiers(filteredWorkbook);
+
       const uniqueMatches = new Map<string, string>();
       for (const match of matches) {
         const key = normalize(match.value, relaxed);
@@ -366,16 +470,22 @@ export default function Home() {
       const baseName = second.file.name.replace(/\.(xlsx?|xls)$/i, "");
       const finished: MatchResult = {
         workbook: outputWorkbook,
+        filteredWorkbook,
         sourceCount,
         targetCount,
+        sourceMatchRowCount: sourceMatchRows.length,
         matchCount: matches.length,
         uniqueMatchCount: uniqueMatches.size,
+        uniqueUnmatchedCount: unmatchedNumbers.size,
         protectedLongIds,
         matchedNumbers: [...uniqueMatches.values()],
+        unmatchedNumbers: [...unmatchedNumbers.values()],
         samples: matches.slice(0, 12).map(({ row, value }) => ({ row, value })),
         outputName: `${baseName}_比对标黄.xlsx`,
+        filteredOutputName: `${baseName}_筛选完整行.xlsx`,
       };
       setResult(finished);
+      setNumberView("matched");
       setCopied(false);
       setTimeout(
         () => resultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
@@ -392,9 +502,8 @@ export default function Home() {
     }
   }
 
-  function downloadResult() {
-    if (!result) return;
-    const bytes = XLSX.write(result.workbook, {
+  function saveWorkbook(workbook: XLSX.WorkBook, fileName: string) {
+    const bytes = XLSX.write(workbook, {
       type: "array",
       bookType: "xlsx",
       cellStyles: true,
@@ -407,11 +516,21 @@ export default function Home() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = result.outputName;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     link.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function downloadResult() {
+    if (!result) return;
+    saveWorkbook(result.workbook, result.outputName);
+  }
+
+  function downloadFilteredRows() {
+    if (!result) return;
+    saveWorkbook(result.filteredWorkbook, result.filteredOutputName);
   }
 
   function reset() {
@@ -423,12 +542,13 @@ export default function Home() {
     setSecondColumn(-1);
     setResult(null);
     setError("");
+    setNumberView("matched");
     setCopied(false);
     setResetKey((current) => current + 1);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function copyMatches() {
+  async function copyNumbers() {
     const field = matchBoxRef.current;
     if (!field) return;
     try {
@@ -584,8 +704,8 @@ export default function Home() {
                   onChange={(event) => setShowMatchBox(event.target.checked)}
                 />
                 <span>
-                  <b>显示相同号码文本框</b>
-                  <small>完成后可选择、修改或一键复制相同号码</small>
+                  <b>显示号码文本框</b>
+                  <small>可切换相同或不重复号码，并编辑、复制</small>
                 </span>
               </label>
             </div>
@@ -622,8 +742,10 @@ export default function Home() {
           <div className="stat-grid">
             <div><span>来源号码</span><strong>{result.sourceCount.toLocaleString()}</strong></div>
             <div><span>第二表号码</span><strong>{result.targetCount.toLocaleString()}</strong></div>
+            <div><span>第一表相同行</span><strong>{result.sourceMatchRowCount.toLocaleString()}</strong></div>
             <div className="accent-stat"><span>匹配行数</span><strong>{result.matchCount.toLocaleString()}</strong></div>
             <div><span>唯一匹配号码</span><strong>{result.uniqueMatchCount.toLocaleString()}</strong></div>
+            <div><span>不重复号码</span><strong>{result.uniqueUnmatchedCount.toLocaleString()}</strong></div>
           </div>
 
           {result.samples.length > 0 ? (
@@ -651,22 +773,63 @@ export default function Home() {
             <div className="empty-result">没有找到相同号码，仍可更换列或文件后再次比对。</div>
           )}
 
-          {showMatchBox && result.matchedNumbers.length > 0 && (
+          {showMatchBox && (
             <div className="match-box-panel">
               <div className="match-box-heading">
                 <div>
-                  <strong>相同号码文本框</strong>
-                  <span>每行一个，共 {result.matchedNumbers.length.toLocaleString()} 个唯一号码</span>
+                  <strong>号码获取框</strong>
+                  <span>
+                    {numberView === "matched"
+                      ? `每行一个，共 ${result.matchedNumbers.length.toLocaleString()} 个相同号码`
+                      : `每行一个，共 ${result.unmatchedNumbers.length.toLocaleString()} 个不重复号码`}
+                  </span>
                 </div>
-                <button type="button" onClick={copyMatches}>
+                <button type="button" onClick={copyNumbers}>
                   {copied ? "已复制" : "复制全部"}
                 </button>
               </div>
+              <div className="number-view-switch" aria-label="选择号码类型">
+                <button
+                  type="button"
+                  className={numberView === "matched" ? "is-active" : ""}
+                  aria-pressed={numberView === "matched"}
+                  onClick={() => {
+                    setNumberView("matched");
+                    setCopied(false);
+                  }}
+                >
+                  相同号码 · {result.matchedNumbers.length.toLocaleString()}
+                </button>
+                <button
+                  type="button"
+                  className={numberView === "unmatched" ? "is-active" : ""}
+                  aria-pressed={numberView === "unmatched"}
+                  onClick={() => {
+                    setNumberView("unmatched");
+                    setCopied(false);
+                  }}
+                >
+                  一键获取不重复号码 · {result.unmatchedNumbers.length.toLocaleString()}
+                </button>
+              </div>
               <textarea
-                key={`${result.outputName}-${result.matchCount}`}
+                key={`${result.outputName}-${numberView}`}
                 ref={matchBoxRef}
-                defaultValue={result.matchedNumbers.join("\n")}
-                aria-label="相同号码，可选择和编辑"
+                defaultValue={
+                  numberView === "matched"
+                    ? result.matchedNumbers.join("\n")
+                    : result.unmatchedNumbers.join("\n")
+                }
+                placeholder={
+                  numberView === "matched"
+                    ? "没有相同号码"
+                    : "没有不重复号码"
+                }
+                aria-label={
+                  numberView === "matched"
+                    ? "相同号码，可选择和编辑"
+                    : "不重复号码，可选择和编辑"
+                }
                 spellCheck={false}
               />
             </div>
@@ -677,9 +840,19 @@ export default function Home() {
               已保护 {result.protectedLongIds.toLocaleString()} 个长编号，导出时不会被转成科学计数法。
             </p>
           )}
+          <p className="filter-note">
+            “筛选完整行”文件包含：第一表相同行、第二表相同行、第二表不重复行，原行的所有列都会保留。
+          </p>
           <div className="result-actions">
             <button className="download-button" type="button" onClick={downloadResult}>
               下载标黄后的 Excel
+            </button>
+            <button
+              className="filter-download-button"
+              type="button"
+              onClick={downloadFilteredRows}
+            >
+              下载筛选完整行
             </button>
             <button className="secondary-button" type="button" onClick={reset}>
               比对其他文件

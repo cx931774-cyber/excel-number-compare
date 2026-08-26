@@ -376,7 +376,8 @@ h1 {
 }
 
 .compare-button,
-.download-button {
+.download-button,
+.filter-download-button {
   width: 100%;
   margin-top: 18px;
   padding: 18px;
@@ -391,7 +392,8 @@ h1 {
 }
 
 .compare-button:not(:disabled):hover,
-.download-button:hover {
+.download-button:hover,
+.filter-download-button:hover {
   transform: translate(2px, 2px);
   box-shadow: 2px 2px 0 var(--ink);
   background: #efff82;
@@ -439,7 +441,7 @@ h1 {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-top: 26px;
 }
@@ -571,6 +573,35 @@ h1 {
   font-weight: 850;
 }
 
+.number-view-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: #f1f1e9;
+}
+
+.number-view-switch button {
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.number-view-switch button.is-active {
+  border-color: var(--ink);
+  background: var(--accent);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
 .match-box-panel textarea {
   display: block;
   width: 100%;
@@ -595,14 +626,22 @@ h1 {
   font-size: 12px;
 }
 
+.filter-note {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .result-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(180px, 0.5fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(150px, 0.45fr);
   gap: 12px;
   margin-top: 20px;
 }
 
-.download-button { margin-top: 0; }
+.download-button,
+.filter-download-button { margin-top: 0; }
 
 .secondary-button {
   padding: 16px;
@@ -670,6 +709,7 @@ h1 {
     gap: 7px;
   }
   .selector-card label:not(:first-child) { margin-top: 8px; }
+  .number-view-switch { grid-template-columns: 1fr; }
   .step-row { flex-wrap: wrap; }
   .step-row small { width: 100%; margin-left: 0; }
   .result-heading { flex-direction: column; }
