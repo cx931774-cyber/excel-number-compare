@@ -9,9 +9,6 @@ import {
 } from "./text-processing";
 
 const DEFAULT_HEADERS = "手机号 运营商 充值金额 姓名 余额";
-const EXAMPLE_TEXT = `13450438325 冯林林 300 移动 余额：192.49
-18021306062 俞淑钧 江苏电信 300 余额：112.03
-18112613136 金宝 江苏电信 300 余额：100.16`;
 
 type TextResult = {
   headers: string[];
@@ -138,15 +135,6 @@ export default function TextExcelTool() {
     setCopied(false);
   }
 
-  function fillExample() {
-    setHeaderInput(DEFAULT_HEADERS);
-    setTextInput(EXAMPLE_TEXT);
-    setResult(null);
-    setOutputText("");
-    setCopied(false);
-    setError("");
-  }
-
   function resetTextTool() {
     setHeaderInput(DEFAULT_HEADERS);
     setTextInput("");
@@ -191,13 +179,12 @@ export default function TextExcelTool() {
 
         <div className="simple-field-heading text-source-heading">
           <label htmlFor="text-excel-source">待处理文本</label>
-          <button type="button" onClick={fillExample}>使用示例</button>
         </div>
         <textarea
           id="text-excel-source"
           className="source-textarea"
           value={textInput}
-          placeholder={EXAMPLE_TEXT}
+          placeholder="请粘贴需要处理的文本，每行一条"
           aria-label="需要处理的文本，每行一条"
           spellCheck={false}
           onChange={(event) => {
