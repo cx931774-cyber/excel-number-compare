@@ -3,7 +3,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: "github-pages",
-  base: "/excel-number-compare/",
+  base: "./",
   publicDir: "../public",
   plugins: [react()],
   build: {
