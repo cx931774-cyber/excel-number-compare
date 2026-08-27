@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import "./globals.css";
 
-const title = "表格号码比对";
+const title = "Excel 表格比对与文本整理工具";
 const description =
-  "在浏览器本地上传两个 Excel 表格，查找相同与不重复号码，在第二个表格中标黄并导出。";
+  "在浏览器本地比对两个 Excel 表格，或将杂乱文本自动识别、分列并导出为 Excel。";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

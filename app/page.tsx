@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
+import TextExcelTool from "./text-excel-tool";
 
 type WorkbookFile = {
   file: File;
@@ -281,6 +282,7 @@ function UploadCard({
 }
 
 export default function Home() {
+  const [activeTool, setActiveTool] = useState<"compare" | "text">("compare");
   const [first, setFirst] = useState<WorkbookFile | null>(null);
   const [second, setSecond] = useState<WorkbookFile | null>(null);
   const [firstSheet, setFirstSheet] = useState("");
@@ -726,18 +728,50 @@ export default function Home() {
       <header className="hero">
         <div className="brand-mark">表</div>
         <div>
-          <p className="eyebrow">Excel 本地比对工具</p>
-          <h1>号码对比，一次完成</h1>
+          <p className="eyebrow">Excel 本地处理工具</p>
+          <h1>
+            {activeTool === "compare" ? "号码对比，一次完成" : "杂乱文本，整理成表"}
+          </h1>
           <p className="hero-copy">
-            上传两个表格，按一个或多个自定义条件找出相同行，在第二个表格中标黄并导出。文件只在你的浏览器中处理。
+            {activeTool === "compare"
+              ? "上传两个表格，按一个或多个自定义条件找出相同行，在第二个表格中标黄并导出。"
+              : "输入空格分隔的表头，粘贴文本，系统自动识别字段并生成可下载的 Excel。"}
+            文件只在你的浏览器中处理。
           </p>
         </div>
-        {(first || second) && (
+        {activeTool === "compare" && (first || second) && (
           <button className="reset-button" type="button" onClick={reset}>
             重新开始
           </button>
         )}
       </header>
+
+      <div className="tool-switch" role="tablist" aria-label="选择处理方式">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTool === "compare"}
+          className={activeTool === "compare" ? "is-active" : ""}
+          onClick={() => setActiveTool("compare")}
+        >
+          <span>01</span>
+          <b>Excel 表格比对</b>
+          <small>两个文件查相同与不重复</small>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTool === "text"}
+          className={activeTool === "text" ? "is-active" : ""}
+          onClick={() => setActiveTool("text")}
+        >
+          <span>02</span>
+          <b>文本整理成 Excel</b>
+          <small>粘贴文本自动分列导出</small>
+        </button>
+      </div>
+
+      <div hidden={activeTool !== "compare"}>
 
       <section className="workspace-card" aria-label="上传并比对表格">
         <div className="step-row">
@@ -1088,6 +1122,11 @@ export default function Home() {
           </div>
         </section>
       )}
+      </div>
+
+      <div hidden={activeTool !== "text"}>
+        <TextExcelTool />
+      </div>
 
       <footer className="privacy-note">
         <span className="status-dot" />

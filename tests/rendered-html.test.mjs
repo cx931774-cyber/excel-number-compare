@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import {
+  parseTextHeaders,
+  parseTextRows,
+} from "../app/text-processing.ts";
 
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -29,8 +33,9 @@ test("server-renders the Excel comparison site", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>表格号码比对<\/title>/i);
+  assert.match(html, /<title>Excel 表格比对与文本整理工具<\/title>/i);
   assert.match(html, /号码对比，一次完成/);
+  assert.match(html, /文本整理成 Excel/);
   assert.match(html, /第一个表格/);
   assert.match(html, /第二个表格/);
   assert.match(html, /上传两个文件后开始比对/);
@@ -64,4 +69,38 @@ test("supports multiple custom comparison conditions", async () => {
   assert.match(page, /sourceRowsByComposite/);
   assert.match(page, /sourceRowsByCondition/);
   assert.match(page, /conditions\.length >= 8/);
+});
+
+test("classifies free-form text into the requested Excel columns", () => {
+  const headers = parseTextHeaders("手机号 运营商 充值金额 姓名 余额");
+  const rows = parseTextRows(
+    headers,
+    `13450438325 冯林林 300 移动 余额：192.49
+18021306062  俞淑钧  江苏电信 300 余额：112.03
+18112613136  金宝 江苏电信 300 余额：100.16`,
+  );
+
+  assert.deepEqual(rows, [
+    {
+      手机号: "13450438325",
+      运营商: "移动",
+      充值金额: "300",
+      姓名: "冯林林",
+      余额: "192.49",
+    },
+    {
+      手机号: "18021306062",
+      运营商: "江苏电信",
+      充值金额: "300",
+      姓名: "俞淑钧",
+      余额: "112.03",
+    },
+    {
+      手机号: "18112613136",
+      运营商: "江苏电信",
+      充值金额: "300",
+      姓名: "金宝",
+      余额: "100.16",
+    },
+  ]);
 });
