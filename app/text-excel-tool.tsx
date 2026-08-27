@@ -173,15 +173,10 @@ export default function TextExcelTool() {
   return (
     <>
       <section className="workspace-card text-tool-card" aria-label="文本整理成 Excel">
-        <div className="step-row">
-          <span>第 1 步</span>
-          <strong>输入 Excel 表头</strong>
-          <small>空格分隔，每个词作为一列表头</small>
+        <div className="simple-field-heading">
+          <label htmlFor="text-excel-headers">表头</label>
+          <span>用空格分隔，例如：手机号 运营商 充值金额 姓名 余额</span>
         </div>
-
-        <label className="text-field-label" htmlFor="text-excel-headers">
-          表头顺序
-        </label>
         <input
           id="text-excel-headers"
           className="header-input"
@@ -193,28 +188,13 @@ export default function TextExcelTool() {
             setResult(null);
           }}
         />
-        <div className="header-chip-row" aria-label="识别到的表头">
-          {detectedHeaders.length ? (
-            detectedHeaders.map((header, index) => (
-              <span key={header}>
-                <b>{index + 1}</b>
-                {header}
-              </span>
-            ))
-          ) : (
-            <em>尚未识别到表头</em>
-          )}
-        </div>
 
-        <div className="text-step-heading">
-          <div className="step-row compact">
-            <span>第 2 步</span>
-            <strong>粘贴需要处理的文本</strong>
-            <small>每行生成 Excel 中的一行</small>
-          </div>
-          <button type="button" onClick={fillExample}>填入示例</button>
+        <div className="simple-field-heading text-source-heading">
+          <label htmlFor="text-excel-source">待处理文本</label>
+          <button type="button" onClick={fillExample}>使用示例</button>
         </div>
         <textarea
+          id="text-excel-source"
           className="source-textarea"
           value={textInput}
           placeholder={EXAMPLE_TEXT}
@@ -226,86 +206,44 @@ export default function TextExcelTool() {
           }}
         />
 
-        <div className="recognition-note">
-          <strong>自动识别：</strong>
-          手机号、姓名、移动/联通/电信/广电运营商、充值金额，以及“余额：192.49”这样的带标签内容；字段顺序可以不同。
-        </div>
-
         {error && <div className="error-banner" role="alert">{error}</div>}
         <button
           className="compare-button"
           type="button"
           onClick={processText}
         >
-          处理文本并生成表格
+          开始整理
         </button>
       </section>
 
       {result && currentResult && (
         <section className="result-card text-result-card" aria-live="polite">
-          <div className="result-heading">
+          <div className="compact-result-heading">
             <div>
-              <p className="eyebrow">处理完成</p>
-              <h2>已整理 {currentResult.rows.length.toLocaleString()} 行文本</h2>
-              <p>内容已经按照你输入的表头顺序放入对应列。</p>
+              <strong>处理结果</strong>
+              <span>
+                {currentResult.rows.length.toLocaleString()} 行 · {currentResult.headers.length} 列
+                {currentResult.incompleteCount
+                  ? ` · ${currentResult.incompleteCount} 行有空白字段`
+                  : ""}
+              </span>
             </div>
-            <div className="success-badge">可导出</div>
+            <button type="button" onClick={copyOutput}>
+              {copied ? "已复制" : "复制全部"}
+            </button>
           </div>
 
-          <div className="text-result-summary">
-            <div><span>表头列数</span><strong>{currentResult.headers.length}</strong></div>
-            <div><span>数据行数</span><strong>{currentResult.rows.length}</strong></div>
-            <div className={currentResult.incompleteCount ? "has-warning" : ""}>
-              <span>存在空白字段的行</span>
-              <strong>{currentResult.incompleteCount}</strong>
-            </div>
-          </div>
-
-          <div className="editable-output-panel">
-            <div className="editable-output-heading">
-              <div>
-                <strong>结果编辑框</strong>
-                <span>第一行为表头，列之间用 Tab 分隔；可修改、全选或复制</span>
-              </div>
-              <button type="button" onClick={copyOutput}>
-                {copied ? "已复制" : "复制全部"}
-              </button>
-            </div>
-            <textarea
-              ref={outputRef}
-              value={outputText}
-              aria-label="整理后的表格内容，可编辑和复制"
-              spellCheck={false}
-              onChange={(event) => {
-                setOutputText(event.target.value);
-                setCopied(false);
-              }}
-            />
-          </div>
-
-          <div className="text-preview-wrap">
-            <table className="text-preview-table">
-              <thead>
-                <tr>
-                  <th>行号</th>
-                  {currentResult.headers.map((header) => <th key={header}>{header}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {currentResult.rows.slice(0, 20).map((row, rowIndex) => (
-                  <tr key={rowIndex}>
-                    <td>{rowIndex + 1}</td>
-                    {currentResult.headers.map((header) => (
-                      <td key={header}>{row[header] || <span className="empty-cell">空</span>}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {currentResult.rows.length > 20 && (
-            <p className="preview-limit">预览前 20 行，导出的 Excel 包含全部 {currentResult.rows.length.toLocaleString()} 行。</p>
-          )}
+          <textarea
+            ref={outputRef}
+            className="result-editor"
+            value={outputText}
+            aria-label="整理后的表格内容，可编辑和复制"
+            spellCheck={false}
+            onChange={(event) => {
+              setOutputText(event.target.value);
+              setCopied(false);
+            }}
+          />
 
           <div className="text-result-actions">
             <button
@@ -315,7 +253,7 @@ export default function TextExcelTool() {
                 downloadWorkbook(currentResult.headers, currentResult.rows)
               }
             >
-              按编辑框内容下载 Excel
+              下载 Excel
             </button>
             <button className="secondary-button" type="button" onClick={resetTextTool}>
               处理其他文本

@@ -28,16 +28,12 @@ type MatchCondition = {
 type MatchResult = {
   workbook: XLSX.WorkBook;
   filteredWorkbook: XLSX.WorkBook;
-  sourceCount: number;
-  targetCount: number;
   sourceMatchRowCount: number;
   matchCount: number;
-  uniqueMatchCount: number;
   uniqueUnmatchedCount: number;
   protectedLongIds: number;
   matchedNumbers: string[];
   unmatchedNumbers: string[];
-  samples: Array<{ row: number; value: string }>;
   outputName: string;
   filteredOutputName: string;
 };
@@ -470,7 +466,6 @@ export default function Home() {
       const sourceRowsByCondition = resolvedConditions.map(
         () => new Map<string, number[]>(),
       );
-      let sourceCount = 0;
       for (let row = sourceStartRow; row <= sourceRange.e.r; row += 1) {
         const values = resolvedConditions.map(({ firstColumn }) =>
           normalize(
@@ -483,7 +478,6 @@ export default function Home() {
         const hasUsableValues =
           matchMode === "all" ? values.every(Boolean) : values.some(Boolean);
         if (!hasUsableValues) continue;
-        sourceCount += 1;
 
         if (matchMode === "all") {
           const key = JSON.stringify(values);
@@ -502,7 +496,6 @@ export default function Home() {
 
       const targetRange = XLSX.utils.decode_range(targetSheet["!ref"]);
       const matches: Array<{
-        row: number;
         worksheetRow: number;
         value: string;
         addresses: string[];
@@ -510,14 +503,12 @@ export default function Home() {
       }> = [];
       const unmatchedNumbers = new Map<string, string>();
       const unmatchedRows: number[] = [];
-      let targetCount = 0;
       for (let row = targetStartRow; row <= targetRange.e.r; row += 1) {
         const displayValues = resolvedConditions.map(({ secondColumn }) =>
           cellText(targetSheet[XLSX.utils.encode_cell({ r: row, c: secondColumn })]),
         );
         const values = displayValues.map((value) => normalize(value, relaxed));
         if (!values.some(Boolean)) continue;
-        targetCount += 1;
         const key = JSON.stringify(values);
         const summary =
           displayValues.length === 1
@@ -551,7 +542,6 @@ export default function Home() {
 
         if (matchingIndexes.length) {
           matches.push({
-            row: row + 1,
             worksheetRow: row,
             value: summary,
             addresses: matchingIndexes.map((index) =>
@@ -620,16 +610,12 @@ export default function Home() {
       const finished: MatchResult = {
         workbook: outputWorkbook,
         filteredWorkbook,
-        sourceCount,
-        targetCount,
         sourceMatchRowCount: sourceMatchRows.length,
         matchCount: matches.length,
-        uniqueMatchCount: uniqueMatches.size,
         uniqueUnmatchedCount: unmatchedNumbers.size,
         protectedLongIds,
         matchedNumbers: [...uniqueMatches.values()],
         unmatchedNumbers: [...unmatchedNumbers.values()],
-        samples: matches.slice(0, 12).map(({ row, value }) => ({ row, value })),
         outputName: `${baseName}_比对标黄.xlsx`,
         filteredOutputName: `${baseName}_筛选完整行.xlsx`,
       };
@@ -728,16 +714,8 @@ export default function Home() {
       <header className="hero">
         <div className="brand-mark">表</div>
         <div>
-          <p className="eyebrow">Excel 本地处理工具</p>
-          <h1>
-            {activeTool === "compare" ? "号码对比，一次完成" : "杂乱文本，整理成表"}
-          </h1>
-          <p className="hero-copy">
-            {activeTool === "compare"
-              ? "上传两个表格，按一个或多个自定义条件找出相同行，在第二个表格中标黄并导出。"
-              : "输入空格分隔的表头，粘贴文本，系统自动识别字段并生成可下载的 Excel。"}
-            文件只在你的浏览器中处理。
-          </p>
+          <p className="eyebrow">本地处理 · 无需上传服务器</p>
+          <h1>Excel 工具</h1>
         </div>
         {activeTool === "compare" && (first || second) && (
           <button className="reset-button" type="button" onClick={reset}>
@@ -754,9 +732,7 @@ export default function Home() {
           className={activeTool === "compare" ? "is-active" : ""}
           onClick={() => setActiveTool("compare")}
         >
-          <span>01</span>
-          <b>Excel 表格比对</b>
-          <small>两个文件查相同与不重复</small>
+          表格比对
         </button>
         <button
           type="button"
@@ -765,17 +741,14 @@ export default function Home() {
           className={activeTool === "text" ? "is-active" : ""}
           onClick={() => setActiveTool("text")}
         >
-          <span>02</span>
-          <b>文本整理成 Excel</b>
-          <small>粘贴文本自动分列导出</small>
+          文本转 Excel
         </button>
       </div>
 
       <div hidden={activeTool !== "compare"}>
 
       <section className="workspace-card" aria-label="上传并比对表格">
-        <div className="step-row">
-          <span>第 1 步</span>
+        <div className="simple-card-heading">
           <strong>上传两个 Excel 表格</strong>
         </div>
         <div className="upload-grid">
@@ -801,8 +774,7 @@ export default function Home() {
 
         {first && second && (
           <div className="configuration">
-            <div className="step-row compact">
-              <span>第 2 步</span>
+            <div className="simple-card-heading compact">
               <strong>设置自定义比对条件</strong>
               <small>可添加多组列，并选择全部满足或任一满足</small>
             </div>
@@ -990,50 +962,14 @@ export default function Home() {
 
       {result && (
         <section className="result-card" ref={resultRef} aria-live="polite">
-          <div className="result-heading">
+          <div className="compact-result-heading">
             <div>
-              <p className="eyebrow">比对完成</p>
-              <h2>已找到 {result.matchCount.toLocaleString()} 条相同行</h2>
-              <p>
-                按“{matchMode === "all" ? "全部条件相同" : "任一条件相同"}”完成比对，对应单元格已标黄。
-              </p>
+              <strong>找到 {result.matchCount.toLocaleString()} 条相同行</strong>
+              <span>
+                第一表相同行 {result.sourceMatchRowCount.toLocaleString()} 条 · 不重复内容 {result.uniqueUnmatchedCount.toLocaleString()} 条
+              </span>
             </div>
-            <div className="success-badge">完成</div>
           </div>
-
-          <div className="stat-grid">
-            <div><span>第一表有效行</span><strong>{result.sourceCount.toLocaleString()}</strong></div>
-            <div><span>第二表有效行</span><strong>{result.targetCount.toLocaleString()}</strong></div>
-            <div><span>第一表相同行</span><strong>{result.sourceMatchRowCount.toLocaleString()}</strong></div>
-            <div className="accent-stat"><span>匹配行数</span><strong>{result.matchCount.toLocaleString()}</strong></div>
-            <div><span>唯一匹配内容</span><strong>{result.uniqueMatchCount.toLocaleString()}</strong></div>
-            <div><span>不重复内容</span><strong>{result.uniqueUnmatchedCount.toLocaleString()}</strong></div>
-          </div>
-
-          {result.samples.length > 0 ? (
-            <div className="sample-panel">
-              <div className="sample-header">
-                <strong>匹配预览</strong>
-                <span>最多显示前 12 条</span>
-              </div>
-              <div className="sample-table" role="table">
-                <div className="sample-row table-head" role="row">
-                  <span>第二表行号</span>
-                  <span>匹配的条件内容</span>
-                  <span>状态</span>
-                </div>
-                {result.samples.map((sample) => (
-                  <div className="sample-row" role="row" key={`${sample.row}-${sample.value}`}>
-                    <span>第 {sample.row} 行</span>
-                    <b>{sample.value}</b>
-                    <em>已标黄</em>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="empty-result">没有找到符合条件的相同行，可更换条件、列或文件后再次比对。</div>
-          )}
 
           {showMatchBox && (
             <div className="match-box-panel">

@@ -34,8 +34,8 @@ test("server-renders the Excel comparison site", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Excel 表格比对与文本整理工具<\/title>/i);
-  assert.match(html, /号码对比，一次完成/);
-  assert.match(html, /文本整理成 Excel/);
+  assert.match(html, /表格比对/);
+  assert.match(html, /文本转 Excel/);
   assert.match(html, /第一个表格/);
   assert.match(html, /第二个表格/);
   assert.match(html, /上传两个文件后开始比对/);
@@ -111,9 +111,10 @@ test("text results stay editable, copyable, and downloadable", async () => {
     "utf8",
   );
 
-  assert.match(tool, /结果编辑框/);
+  assert.match(tool, /处理结果/);
   assert.match(tool, /复制全部/);
+  assert.match(tool, /result-editor/);
   assert.match(tool, /textToTable\(outputText\)/);
-  assert.match(tool, /按编辑框内容下载 Excel/);
+  assert.match(tool, /下载 Excel/);
   assert.match(tool, /URL\.revokeObjectURL/);
 });
