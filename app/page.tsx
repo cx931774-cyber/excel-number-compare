@@ -714,7 +714,6 @@ export default function Home() {
       <header className="hero">
         <div className="brand-mark">表</div>
         <div>
-          <p className="eyebrow">本地处理 · 无需上传服务器</p>
           <h1>Excel 工具</h1>
         </div>
         {activeTool === "compare" && (first || second) && (
