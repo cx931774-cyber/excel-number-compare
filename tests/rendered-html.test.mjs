@@ -104,3 +104,16 @@ test("classifies free-form text into the requested Excel columns", () => {
     },
   ]);
 });
+
+test("text results stay editable, copyable, and downloadable", async () => {
+  const tool = await readFile(
+    new URL("../app/text-excel-tool.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(tool, /结果编辑框/);
+  assert.match(tool, /复制全部/);
+  assert.match(tool, /textToTable\(outputText\)/);
+  assert.match(tool, /按编辑框内容下载 Excel/);
+  assert.match(tool, /URL\.revokeObjectURL/);
+});

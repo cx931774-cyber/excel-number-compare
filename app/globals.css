@@ -304,6 +304,66 @@ h1 {
   background: #fff8e9;
 }
 
+.editable-output-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: #fbfaf5;
+}
+
+.editable-output-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 11px;
+}
+
+.editable-output-heading > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.editable-output-heading strong { font-size: 14px; }
+
+.editable-output-heading span {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.editable-output-heading button {
+  flex: 0 0 auto;
+  padding: 9px 13px;
+  border: 1px solid var(--ink);
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.editable-output-panel textarea {
+  display: block;
+  width: 100%;
+  min-height: 210px;
+  padding: 13px;
+  resize: vertical;
+  border: 1px solid #c7cec9;
+  border-radius: 11px;
+  background: white;
+  color: var(--ink);
+  font: 12px/1.65 Consolas, "Microsoft YaHei", monospace;
+  white-space: pre;
+}
+
+.editable-output-panel textarea:focus {
+  border-color: var(--ink);
+  outline: 3px solid rgba(231, 255, 79, 0.7);
+}
+
 .text-preview-wrap {
   margin-top: 18px;
   overflow-x: auto;
@@ -1124,6 +1184,7 @@ h1 {
   .remove-condition { grid-column: 1 / -1; }
   .number-view-switch { grid-template-columns: 1fr; }
   .text-step-heading { align-items: flex-start; flex-direction: column; }
+  .editable-output-heading { align-items: flex-start; flex-direction: column; }
   .source-textarea { min-height: 300px; }
   .step-row { flex-wrap: wrap; }
   .step-row small { width: 100%; margin-left: 0; }

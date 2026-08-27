@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx-js-style";
 import {
   parseTextHeaders,
@@ -18,6 +18,33 @@ type TextResult = {
   rows: TextExcelRow[];
   incompleteCount: number;
 };
+
+function tableToText(headers: string[], rows: TextExcelRow[]) {
+  return [
+    headers.join("\t"),
+    ...rows.map((row) => headers.map((header) => row[header] ?? "").join("\t")),
+  ].join("\n");
+}
+
+function textToTable(text: string): TextResult | null {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  if (!lines.length) return null;
+  const headers = lines[0].split("\t").map((header) => header.trim()).filter(Boolean);
+  if (!headers.length) return null;
+  const rows = lines.slice(1).map((line) => {
+    const values = line.split("\t");
+    return Object.fromEntries(
+      headers.map((header, index) => [header, values[index]?.trim() ?? ""]),
+    );
+  });
+  return {
+    headers,
+    rows,
+    incompleteCount: rows.filter((row) =>
+      headers.some((header) => !row[header]),
+    ).length,
+  };
+}
 
 function downloadWorkbook(headers: string[], rows: TextExcelRow[]) {
   const values = [
@@ -76,11 +103,18 @@ export default function TextExcelTool() {
   const [headerInput, setHeaderInput] = useState(DEFAULT_HEADERS);
   const [textInput, setTextInput] = useState("");
   const [result, setResult] = useState<TextResult | null>(null);
+  const [outputText, setOutputText] = useState("");
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const outputRef = useRef<HTMLTextAreaElement>(null);
 
   const detectedHeaders = useMemo(
     () => parseTextHeaders(headerInput),
     [headerInput],
+  );
+  const currentResult = useMemo(
+    () => (result ? textToTable(outputText) ?? result : null),
+    [outputText, result],
   );
 
   function processText() {
@@ -100,12 +134,16 @@ export default function TextExcelTool() {
       detectedHeaders.some((header) => !row[header]),
     ).length;
     setResult({ headers: detectedHeaders, rows, incompleteCount });
+    setOutputText(tableToText(detectedHeaders, rows));
+    setCopied(false);
   }
 
   function fillExample() {
     setHeaderInput(DEFAULT_HEADERS);
     setTextInput(EXAMPLE_TEXT);
     setResult(null);
+    setOutputText("");
+    setCopied(false);
     setError("");
   }
 
@@ -113,7 +151,23 @@ export default function TextExcelTool() {
     setHeaderInput(DEFAULT_HEADERS);
     setTextInput("");
     setResult(null);
+    setOutputText("");
+    setCopied(false);
     setError("");
+  }
+
+  async function copyOutput() {
+    const field = outputRef.current;
+    if (!field) return;
+    try {
+      await navigator.clipboard.writeText(field.value);
+    } catch {
+      field.focus();
+      field.select();
+      document.execCommand("copy");
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
   }
 
   return (
@@ -187,24 +241,46 @@ export default function TextExcelTool() {
         </button>
       </section>
 
-      {result && (
+      {result && currentResult && (
         <section className="result-card text-result-card" aria-live="polite">
           <div className="result-heading">
             <div>
               <p className="eyebrow">处理完成</p>
-              <h2>已整理 {result.rows.length.toLocaleString()} 行文本</h2>
+              <h2>已整理 {currentResult.rows.length.toLocaleString()} 行文本</h2>
               <p>内容已经按照你输入的表头顺序放入对应列。</p>
             </div>
             <div className="success-badge">可导出</div>
           </div>
 
           <div className="text-result-summary">
-            <div><span>表头列数</span><strong>{result.headers.length}</strong></div>
-            <div><span>数据行数</span><strong>{result.rows.length}</strong></div>
-            <div className={result.incompleteCount ? "has-warning" : ""}>
+            <div><span>表头列数</span><strong>{currentResult.headers.length}</strong></div>
+            <div><span>数据行数</span><strong>{currentResult.rows.length}</strong></div>
+            <div className={currentResult.incompleteCount ? "has-warning" : ""}>
               <span>存在空白字段的行</span>
-              <strong>{result.incompleteCount}</strong>
+              <strong>{currentResult.incompleteCount}</strong>
             </div>
+          </div>
+
+          <div className="editable-output-panel">
+            <div className="editable-output-heading">
+              <div>
+                <strong>结果编辑框</strong>
+                <span>第一行为表头，列之间用 Tab 分隔；可修改、全选或复制</span>
+              </div>
+              <button type="button" onClick={copyOutput}>
+                {copied ? "已复制" : "复制全部"}
+              </button>
+            </div>
+            <textarea
+              ref={outputRef}
+              value={outputText}
+              aria-label="整理后的表格内容，可编辑和复制"
+              spellCheck={false}
+              onChange={(event) => {
+                setOutputText(event.target.value);
+                setCopied(false);
+              }}
+            />
           </div>
 
           <div className="text-preview-wrap">
@@ -212,14 +288,14 @@ export default function TextExcelTool() {
               <thead>
                 <tr>
                   <th>行号</th>
-                  {result.headers.map((header) => <th key={header}>{header}</th>)}
+                  {currentResult.headers.map((header) => <th key={header}>{header}</th>)}
                 </tr>
               </thead>
               <tbody>
-                {result.rows.slice(0, 20).map((row, rowIndex) => (
+                {currentResult.rows.slice(0, 20).map((row, rowIndex) => (
                   <tr key={rowIndex}>
                     <td>{rowIndex + 1}</td>
-                    {result.headers.map((header) => (
+                    {currentResult.headers.map((header) => (
                       <td key={header}>{row[header] || <span className="empty-cell">空</span>}</td>
                     ))}
                   </tr>
@@ -227,17 +303,19 @@ export default function TextExcelTool() {
               </tbody>
             </table>
           </div>
-          {result.rows.length > 20 && (
-            <p className="preview-limit">预览前 20 行，导出的 Excel 包含全部 {result.rows.length.toLocaleString()} 行。</p>
+          {currentResult.rows.length > 20 && (
+            <p className="preview-limit">预览前 20 行，导出的 Excel 包含全部 {currentResult.rows.length.toLocaleString()} 行。</p>
           )}
 
           <div className="text-result-actions">
             <button
               className="download-button"
               type="button"
-              onClick={() => downloadWorkbook(result.headers, result.rows)}
+              onClick={() =>
+                downloadWorkbook(currentResult.headers, currentResult.rows)
+              }
             >
-              下载 Excel 文件
+              按编辑框内容下载 Excel
             </button>
             <button className="secondary-button" type="button" onClick={resetTextTool}>
               处理其他文本
